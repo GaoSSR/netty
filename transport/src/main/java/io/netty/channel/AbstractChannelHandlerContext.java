@@ -24,6 +24,7 @@ import io.netty.util.ResourceLeakHint;
 import io.netty.util.concurrent.AbstractEventExecutor;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.OrderedEventExecutor;
+import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.internal.ObjectPool.Handle;
 import io.netty.util.internal.ObjectUtil;
 import io.netty.util.internal.PromiseNotificationUtil;
@@ -457,6 +458,24 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         return deregister(newPromise());
     }
 
+    /**
+     * If possible check if the given {@link ChannelPromise} is using the same {@link EventExecutor} as this
+     * {@link ChannelHandlerContext} and if not return a new {@link ChannelPromise} that runs on the same
+     * {@link EventExecutor} as this {@link ChannelHandlerContext}. The result of the new {@link ChannelPromise} is
+     * cascaded to the old {@link ChannelPromise}.
+     *
+     * This is done to ensure that {@link ChannelFutureListener}s that are added to the {@link ChannelPromise} by an
+     * {@link ChannelOutboundHandler} are executed in the same thread as the handler itself. By doing so we can
+     * ensure that there are not issues even if fields etc that are stored in the handler are modified by the listener.
+     */
+    private ChannelPromise ensurePromiseUseCorrectExecutor(ChannelPromise promise) {
+        if (promise instanceof DefaultChannelPromise && !((DefaultChannelPromise) promise).executor().inEventLoop()) {
+            ChannelPromise newPromise = newPromise();
+            PromiseNotifier.cascade(newPromise, promise);
+            return newPromise;
+        }
+        return promise;
+    }
     @Override
     public ChannelFuture bind(final SocketAddress localAddress, final ChannelPromise promise) {
         ObjectUtil.checkNotNull(localAddress, "localAddress");
@@ -483,6 +502,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     private void invokeBind(SocketAddress localAddress, ChannelPromise promise) {
         if (invokeHandler()) {
             try {
+                promise = ensurePromiseUseCorrectExecutor(promise);
                 // DON'T CHANGE
                 // Duplex handlers implements both out/in interfaces causing a scalability issue
                 // see https://bugs.openjdk.org/browse/JDK-8180450
@@ -538,6 +558,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     private void invokeConnect(SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise) {
         if (invokeHandler()) {
             try {
+                promise = ensurePromiseUseCorrectExecutor(promise);
                 // DON'T CHANGE
                 // Duplex handlers implements both out/in interfaces causing a scalability issue
                 // see https://bugs.openjdk.org/browse/JDK-8180450
@@ -590,6 +611,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     private void invokeDisconnect(ChannelPromise promise) {
         if (invokeHandler()) {
             try {
+                promise = ensurePromiseUseCorrectExecutor(promise);
                 // DON'T CHANGE
                 // Duplex handlers implements both out/in interfaces causing a scalability issue
                 // see https://bugs.openjdk.org/browse/JDK-8180450
@@ -638,6 +660,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     private void invokeClose(ChannelPromise promise) {
         if (invokeHandler()) {
             try {
+                promise = ensurePromiseUseCorrectExecutor(promise);
                 // DON'T CHANGE
                 // Duplex handlers implements both out/in interfaces causing a scalability issue
                 // see https://bugs.openjdk.org/browse/JDK-8180450
@@ -686,6 +709,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     private void invokeDeregister(ChannelPromise promise) {
         if (invokeHandler()) {
             try {
+                promise = ensurePromiseUseCorrectExecutor(promise);
                 // DON'T CHANGE
                 // Duplex handlers implements both out/in interfaces causing a scalability issue
                 // see https://bugs.openjdk.org/browse/JDK-8180450
@@ -813,6 +837,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
             EventExecutor executor = next.executor();
             if (executor.inEventLoop()) {
                 if (next.invokeHandler()) {
+                    promise = ensurePromiseUseCorrectExecutor(promise);
                     try {
                         // DON'T CHANGE
                         // Duplex handlers implements both out/in interfaces causing a scalability issue
